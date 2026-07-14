@@ -36,7 +36,7 @@ function renderStalls(){
 }
 function renderHistory(){
   const history=JSON.parse(localStorage.getItem("peihuo-history")||"[]");
-  $("#historyList").innerHTML=history.length?history.map(h=>`<article class="history-item"><h3>${escapeHtml(h.name)}</h3><p>${escapeHtml(h.time)}</p><p>${h.orders} 行订单 · ${h.stalls} 个档口 · ${h.cards} 张卡片</p></article>`).join(""):`<div class="empty-state"><span>🐾</span><p>暂无历史记录</p></div>`;
+  $("#historyList").innerHTML=history.length?history.map(h=>`<article class="history-item"><h3>${escapeHtml(h.name)}</h3><p>${escapeHtml(h.time)}</p><p>${h.orders} 行订单 · ${h.stalls} 个档口 · ${h.cards} 张卡片</p></article>`).join(""):`<div class="empty-state"><span class="pixel-paw"></span><p>暂无历史记录</p></div>`;
 }
 function escapeHtml(s){ return safe(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function escapeAttr(s){ return safe(s).replace(/[\\']/g,"\\$&"); }

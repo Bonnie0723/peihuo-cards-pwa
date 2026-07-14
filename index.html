@@ -9,6 +9,7 @@
     <link rel="icon" href="./icon.svg" />
     <link rel="apple-touch-icon" href="./icon.svg" />
     <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./theme.css" />
     <title>配货喵</title>
   </head>
   <body>
@@ -16,18 +17,18 @@
       <section class="view active" id="view-generate">
         <header class="topbar">
           <div class="brand"><img src="./icon.svg" alt="" /><strong>配货喵</strong></div>
-          <div class="top-actions"><span class="offline"><i></i><span id="networkText">离线可用</span></span><button class="icon-button" data-tab="settings" aria-label="设置">⚙</button></div>
+          <div class="top-actions"><span class="offline"><i></i><span id="networkText">离线可用</span></span><button class="icon-button pixel-gear" data-tab="settings" aria-label="设置"></button></div>
         </header>
 
-        <div class="greeting"><h1>今天也要轻松配货呀 <span>♥</span></h1><p>上传订单，自动匹配档口并生成配货卡</p></div>
+        <div class="greeting"><h1>今天也要轻松配货呀 <span class="pixel-heart" aria-hidden="true"></span></h1></div>
 
         <label class="upload-card" id="dropZone">
-          <div class="cat-box" aria-hidden="true"><span class="pixel-cat">🐱</span><span class="parcel">▰</span></div>
+          <div class="cat-box" aria-hidden="true"><img src="./icon.svg" alt="" /></div>
           <div class="upload-inner">
-            <div class="upload-icon">⇧</div>
+            <div class="upload-icon" aria-hidden="true"></div>
             <h2>拖入订单 Excel</h2>
             <p>自动匹配档口 · 提取商品图片</p>
-            <span class="primary-button">选择订单文件</span>
+            <span class="primary-button"><i class="pixel-file" aria-hidden="true"></i>选择订单文件</span>
             <input id="orderInput" type="file" accept=".xlsx" hidden />
           </div>
         </label>
@@ -35,14 +36,14 @@
         <div class="progress-card hidden" id="progressCard"><div class="progress-head"><strong id="progressTitle">正在读取订单</strong><span id="progressValue">0%</span></div><div class="progress-track"><i id="progressBar"></i></div><p id="progressDetail">准备解析 Excel…</p></div>
 
         <section class="stats" aria-label="今日概览">
-          <article class="stat coral"><span>📋 订单</span><strong id="orderCount">0</strong></article>
-          <article class="stat mint"><span>🏪 档口</span><strong id="stallCount">0</strong></article>
-          <article class="stat blue"><span>⌛ 卡片</span><strong id="cardCount">0</strong></article>
+          <article class="stat coral"><span><i class="mini-icon order-icon"></i>订单</span><strong id="orderCount">0</strong></article>
+          <article class="stat mint"><span><i class="mini-icon shop-icon"></i>档口</span><strong id="stallCount">0</strong></article>
+          <article class="stat blue"><span><i class="mini-icon card-icon"></i>卡片</span><strong id="cardCount">0</strong></article>
         </section>
 
         <section class="recent-section">
           <div class="section-title"><h2>最近生成 <span>✦</span></h2><button data-tab="history">查看全部 ›</button></div>
-          <div id="recentEmpty" class="empty-state"><span>🐾</span><p>还没有配货卡，先上传订单吧</p></div>
+          <div id="recentEmpty" class="empty-state"><span class="pixel-paw"></span><p>还没有配货卡，先上传订单吧</p></div>
           <div id="recentCards" class="card-list"></div>
           <button id="downloadAll" class="download-all hidden">下载全部卡片 ZIP</button>
         </section>
@@ -71,10 +72,10 @@
     </main>
 
     <nav class="bottom-nav" aria-label="主导航">
-      <button class="active" data-tab="generate"><span>▤</span>生成</button>
-      <button data-tab="stalls"><span>🏪</span>档口</button>
-      <button data-tab="history"><span>◷</span>记录</button>
-      <button data-tab="settings"><span>⚙</span>设置</button>
+      <button class="active" data-tab="generate"><span class="nav-icon nav-order"></span>生成</button>
+      <button data-tab="stalls"><span class="nav-icon nav-shop"></span>档口</button>
+      <button data-tab="history"><span class="nav-icon nav-clock"></span>记录</button>
+      <button data-tab="settings"><span class="nav-icon nav-gear"></span>设置</button>
     </nav>
 
     <div id="toast" class="toast" role="status"></div>
