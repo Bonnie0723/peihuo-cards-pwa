@@ -1,0 +1,11 @@
+{
+  "name": "配货喵 · 手机壳配货卡",
+  "short_name": "配货喵",
+  "description": "上传订单 Excel，自动匹配档口并生成配货卡",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fffaf4",
+  "theme_color": "#ff7168",
+  "icons": [{"src":"./icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}

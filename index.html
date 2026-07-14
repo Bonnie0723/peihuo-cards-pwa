@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#ff7168" />
+    <meta name="description" content="上传订单 Excel，自动匹配档口并生成配货卡" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" />
+    <link rel="apple-touch-icon" href="./icon.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+    <title>配货喵</title>
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="view active" id="view-generate">
+        <header class="topbar">
+          <div class="brand"><img src="./icon.svg" alt="" /><strong>配货喵</strong></div>
+          <div class="top-actions"><span class="offline"><i></i><span id="networkText">离线可用</span></span><button class="icon-button" data-tab="settings" aria-label="设置">⚙</button></div>
+        </header>
+
+        <div class="greeting"><h1>今天也要轻松配货呀 <span>♥</span></h1><p>上传订单，自动匹配档口并生成配货卡</p></div>
+
+        <label class="upload-card" id="dropZone">
+          <div class="cat-box" aria-hidden="true"><span class="pixel-cat">🐱</span><span class="parcel">▰</span></div>
+          <div class="upload-inner">
+            <div class="upload-icon">⇧</div>
+            <h2>拖入订单 Excel</h2>
+            <p>自动匹配档口 · 提取商品图片</p>
+            <span class="primary-button">选择订单文件</span>
+            <input id="orderInput" type="file" accept=".xlsx" hidden />
+          </div>
+        </label>
+
+        <div class="progress-card hidden" id="progressCard"><div class="progress-head"><strong id="progressTitle">正在读取订单</strong><span id="progressValue">0%</span></div><div class="progress-track"><i id="progressBar"></i></div><p id="progressDetail">准备解析 Excel…</p></div>
+
+        <section class="stats" aria-label="今日概览">
+          <article class="stat coral"><span>📋 订单</span><strong id="orderCount">0</strong></article>
+          <article class="stat mint"><span>🏪 档口</span><strong id="stallCount">0</strong></article>
+          <article class="stat blue"><span>⌛ 卡片</span><strong id="cardCount">0</strong></article>
+        </section>
+
+        <section class="recent-section">
+          <div class="section-title"><h2>最近生成 <span>✦</span></h2><button data-tab="history">查看全部 ›</button></div>
+          <div id="recentEmpty" class="empty-state"><span>🐾</span><p>还没有配货卡，先上传订单吧</p></div>
+          <div id="recentCards" class="card-list"></div>
+          <button id="downloadAll" class="download-all hidden">下载全部卡片 ZIP</button>
+        </section>
+      </section>
+
+      <section class="view" id="view-stalls">
+        <header class="page-header"><div><h1>档口管理</h1><p>内置映射会保存在当前设备</p></div><button id="resetStalls" class="text-button">恢复默认</button></header>
+        <form id="stallForm" class="stall-form"><input id="stallName" placeholder="档口名称，如 PP" required /><select id="stallFloor" required></select><button>添加</button></form>
+        <div class="search-box"><span>⌕</span><input id="stallSearch" placeholder="搜索档口或楼层" /></div>
+        <div class="stall-summary"><strong id="stallTotal">0</strong> 个档口映射</div>
+        <div id="stallList" class="stall-list"></div>
+      </section>
+
+      <section class="view" id="view-history">
+        <header class="page-header"><div><h1>历史记录</h1><p>记录保存在当前浏览器</p></div><button id="clearHistory" class="text-button danger">清空</button></header>
+        <div id="historyList" class="history-list"></div>
+      </section>
+
+      <section class="view" id="view-settings">
+        <header class="page-header"><div><h1>设置</h1><p>PWA 与导出偏好</p></div></header>
+        <div class="settings-card"><div><strong>安装到手机</strong><p>像普通 App 一样从桌面打开</p></div><button id="installButton">安装 PWA</button></div>
+        <div class="settings-card"><div><strong>安全合并模式</strong><p>宁可拆开，也不合并不同商品编码</p></div><span class="toggle on">已开启</span></div>
+        <div class="settings-card"><div><strong>本地处理</strong><p>Excel 与商品图片不会上传服务器</p></div><span class="safe-badge">✓ 安全</span></div>
+        <div class="about-card"><img src="./icon.svg" alt="配货喵" /><h2>配货喵</h2><p>把跨境订单变成一眼能看懂的配货卡。</p><small>版本 1.0.0</small></div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="主导航">
+      <button class="active" data-tab="generate"><span>▤</span>生成</button>
+      <button data-tab="stalls"><span>🏪</span>档口</button>
+      <button data-tab="history"><span>◷</span>记录</button>
+      <button data-tab="settings"><span>⚙</span>设置</button>
+    </nav>
+
+    <div id="toast" class="toast" role="status"></div>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script defer src="./app.js"></script>
+  </body>
+</html>
