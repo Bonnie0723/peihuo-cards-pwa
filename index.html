@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#ff7168" />
     <meta name="description" content="上传订单 Excel，自动匹配档口并生成配货卡" />
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="icon" href="./icon.svg" />
-    <link rel="apple-touch-icon" href="./icon.svg" />
+    <link rel="icon" href="./app-icon.png" />
+    <link rel="apple-touch-icon" href="./app-icon.png" />
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./theme.css" />
     <title>配货喵</title>
@@ -16,14 +16,14 @@
     <main class="app-shell">
       <section class="view active" id="view-generate">
         <header class="topbar">
-          <div class="brand"><img src="./icon.svg" alt="" /><strong>配货喵</strong></div>
+          <div class="brand"><img src="./app-icon.png" alt="" /><strong>配货喵</strong></div>
           <div class="top-actions"><span class="offline"><i></i><span id="networkText">离线可用</span></span><button class="icon-button pixel-gear" data-tab="settings" aria-label="设置"></button></div>
         </header>
 
         <div class="greeting"><h1>今天也要轻松配货呀 <span class="pixel-heart" aria-hidden="true"></span></h1></div>
 
         <label class="upload-card" id="dropZone">
-          <div class="cat-box" aria-hidden="true"><img src="./icon.svg" alt="" /></div>
+          <div class="cat-box" aria-hidden="true"><img src="./mascot-kitty.png" alt="" /></div>
           <div class="upload-inner">
             <div class="upload-icon" aria-hidden="true"></div>
             <h2>拖入订单 Excel</h2>
@@ -36,9 +36,9 @@
         <div class="progress-card hidden" id="progressCard"><div class="progress-head"><strong id="progressTitle">正在读取订单</strong><span id="progressValue">0%</span></div><div class="progress-track"><i id="progressBar"></i></div><p id="progressDetail">准备解析 Excel…</p></div>
 
         <section class="stats" aria-label="今日概览">
-          <article class="stat coral"><span><i class="mini-icon order-icon"></i>订单</span><strong id="orderCount">0</strong></article>
-          <article class="stat mint"><span><i class="mini-icon shop-icon"></i>档口</span><strong id="stallCount">0</strong></article>
-          <article class="stat blue"><span><i class="mini-icon card-icon"></i>卡片</span><strong id="cardCount">0</strong></article>
+          <article class="stat coral"><span><img class="stat-art" src="./icon-order.png" alt="" />订单</span><strong id="orderCount">0</strong></article>
+          <article class="stat mint"><span><img class="stat-art" src="./icon-stall.png" alt="" />档口</span><strong id="stallCount">0</strong></article>
+          <article class="stat blue"><span><img class="stat-art" src="./icon-card.png" alt="" />卡片</span><strong id="cardCount">0</strong></article>
         </section>
 
         <section class="recent-section">
@@ -67,13 +67,13 @@
         <div class="settings-card"><div><strong>安装到手机</strong><p>像普通 App 一样从桌面打开</p></div><button id="installButton">安装 PWA</button></div>
         <div class="settings-card"><div><strong>安全合并模式</strong><p>宁可拆开，也不合并不同商品编码</p></div><span class="toggle on">已开启</span></div>
         <div class="settings-card"><div><strong>本地处理</strong><p>Excel 与商品图片不会上传服务器</p></div><span class="safe-badge">✓ 安全</span></div>
-        <div class="about-card"><img src="./icon.svg" alt="配货喵" /><h2>配货喵</h2><p>把跨境订单变成一眼能看懂的配货卡。</p><small>版本 1.0.0</small></div>
+        <div class="about-card"><img src="./app-icon.png" alt="配货喵" /><h2>配货喵</h2><p>把跨境订单变成一眼能看懂的配货卡。</p><small>版本 1.0.0</small></div>
       </section>
     </main>
 
     <nav class="bottom-nav" aria-label="主导航">
-      <button class="active" data-tab="generate"><span class="nav-icon nav-order"></span>生成</button>
-      <button data-tab="stalls"><span class="nav-icon nav-shop"></span>档口</button>
+      <button class="active" data-tab="generate"><img class="nav-art" src="./icon-order.png" alt="" />生成</button>
+      <button data-tab="stalls"><img class="nav-art" src="./icon-stall.png" alt="" />档口</button>
       <button data-tab="history"><span class="nav-icon nav-clock"></span>记录</button>
       <button data-tab="settings"><span class="nav-icon nav-gear"></span>设置</button>
     </nav>
