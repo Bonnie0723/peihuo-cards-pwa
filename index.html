@@ -35,6 +35,13 @@
 
         <div class="progress-card hidden" id="progressCard"><div class="progress-head"><strong id="progressTitle">正在读取订单</strong><span id="progressValue">0%</span></div><div class="progress-track"><i id="progressBar"></i></div><p id="progressDetail">准备解析 Excel…</p></div>
 
+        <section class="review-panel hidden" id="reviewPanel">
+          <div class="review-head"><div><h2>审核档口号</h2><p id="reviewSummary"></p></div><button id="cancelReview" class="text-button">重新选择</button></div>
+          <datalist id="stallSuggestions"></datalist>
+          <div class="review-list" id="reviewList"></div>
+          <div class="review-actions"><button id="generateReviewed" class="primary-button">确认无误，生成卡片</button></div>
+        </section>
+
         <section class="stats" aria-label="今日概览">
           <article class="stat coral"><span><img class="stat-art" src="./icon-order.png" alt="" />订单</span><strong id="orderCount">0</strong></article>
           <article class="stat mint"><span><img class="stat-art" src="./icon-stall.png" alt="" />档口</span><strong id="stallCount">0</strong></article>
