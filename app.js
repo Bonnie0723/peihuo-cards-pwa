@@ -13,6 +13,8 @@ const $$ = selector => [...document.querySelectorAll(selector)];
 const safe = value => value == null ? "" : String(value).trim();
 let stallMap = JSON.parse(localStorage.getItem("peihuo-stalls") || "null") || {...DEFAULT_STALLS};
 let generatedCards = [];
+let pendingImport = null;
+let learnedStalls = JSON.parse(localStorage.getItem("peihuo-stall-aliases") || "{}");
 let installPrompt = null;
 
 function saveStalls(){ localStorage.setItem("peihuo-stalls", JSON.stringify(stallMap)); }
@@ -58,15 +60,11 @@ async function processFile(file){
     setProgress(42,"正在解析订单","检查表头、数量和商品编码");
     const {orders,sheetName}=readOrders(data,imageMap);
     setProgress(61,"正在安全合并","商品SKU → 多品名主编码 → 图片ID");
-    const parsed=orders.map(parseOrder);
-    const grouped=mergeOrders(parsed);
-    const unknown=[...new Set(parsed.filter(x=>!stallMap[x.stall.toUpperCase()]).map(x=>x.stall))];
-    if(unknown.length) toast(`${unknown.length} 个档口未映射，已归入“其他”`);
-    setProgress(76,"正在生成卡片",`共 ${Object.keys(grouped).length} 个档口`);
-    generatedCards=await generateCards(grouped);
-    setProgress(100,"生成完成",`${generatedCards.length} 张配货卡可以下载`);
-    updateDashboard(orders,grouped,generatedCards,file.name,sheetName);
-    setTimeout(()=>$("#progressCard").classList.add("hidden"),1300);
+    const parsed=orders.map(o=>parseOrder({...o,stall:suggestStall(o)}));
+    pendingImport={orders,parsed,fileName:file.name,sheetName};
+    setProgress(70,"解析完成","请逐条确认档口后再生成卡片");
+    renderReview();
+    setTimeout(()=>$("#progressCard").classList.add("hidden"),700);
   }catch(error){ console.error(error); $("#progressCard").classList.add("hidden"); toast(error.message||"生成失败，请检查订单文件"); }
 }
 const nextFrame=()=>new Promise(resolve=>requestAnimationFrame(resolve));
@@ -114,6 +112,60 @@ function readOrders(data,imageMap){
   if(!orders.length)throw new Error("最后一个 Sheet 没有订单行");
   return {orders,sheetName};
 }
+
+function suggestStall(order){
+  const raw=safe(order.stall), learned=learnedStalls[raw.toUpperCase()];
+  if(learned)return learned;
+  const direct=ALIASES[raw.toUpperCase()]||raw;
+  if(stallMap[direct.toUpperCase()])return direct.toUpperCase();
+  const tokens=[order.stall,order.sku,order.code,order.multiName].flatMap(v=>safe(v).toUpperCase().split(/[^A-Z0-9\u4e00-\u9fff]+/)).filter(Boolean);
+  return Object.keys(stallMap).sort((a,b)=>b.length-a.length).find(name=>tokens.includes(name.toUpperCase()))||"";
+}
+function renderReview(){
+  if(!pendingImport)return;
+  const rows=pendingImport.parsed, known=Object.keys(stallMap).sort((a,b)=>a.localeCompare(b));
+  $("#stallSuggestions").innerHTML=known.map(s=>`<option value="${escapeHtml(s)}"></option>`).join("");
+  $("#reviewSummary").textContent=`${rows.length} 条商品 · ${rows.filter(x=>x.stall).length} 条已建议 · ${rows.filter(x=>!x.stall).length} 条待填写`;
+  $("#reviewList").innerHTML=rows.map((item,i)=>`<article class="review-row ${item.stall?"suggested":"needs-review"}">
+    <div class="review-product">${item.image?`<img src="${item.image}" alt="">`:`<span class="review-no-image">无图</span>`}<div><strong>${escapeHtml(item.sku||item.style)}</strong><p>${escapeHtml(item.specCn||item.model||"")}</p></div></div>
+    <label>档口号 <input data-review-index="${i}" list="stallSuggestions" value="${escapeHtml(item.stall)}" placeholder="请填写档口号" autocomplete="off" autocapitalize="characters"></label>
+  </article>`).join("");
+  $("#reviewPanel").classList.remove("hidden");
+  $("#reviewPanel").scrollIntoView({behavior:"smooth",block:"start"});
+  validateReview();
+}
+function validateReview(){
+  const missing=pendingImport?pendingImport.parsed.filter(x=>!safe(x.stall)).length:0;
+  $("#generateReviewed").disabled=missing>0;
+  $("#generateReviewed").textContent=missing?`还有 ${missing} 条未填档口`:"确认无误，生成卡片";
+}
+$("#reviewList").addEventListener("input",event=>{
+  const index=event.target.dataset.reviewIndex;if(index==null||!pendingImport)return;
+  pendingImport.parsed[Number(index)].stall=safe(event.target.value).toUpperCase();
+  event.target.closest(".review-row").classList.toggle("needs-review",!safe(event.target.value));
+  validateReview();
+});
+$("#cancelReview").addEventListener("click",()=>{$("#reviewPanel").classList.add("hidden");pendingImport=null;input.value="";});
+$("#generateReviewed").addEventListener("click",async()=>{
+  if(!pendingImport||pendingImport.parsed.some(x=>!safe(x.stall)))return;
+  const {orders,parsed,fileName,sheetName}=pendingImport;
+  parsed.forEach((item,i)=>{
+    const source=safe(orders[i].stall).toUpperCase(), stall=safe(item.stall).toUpperCase();
+    item.stall=stall;if(source&&source!==stall)learnedStalls[source]=stall;
+    if(!stallMap[stall])stallMap[stall]="其他";
+  });
+  localStorage.setItem("peihuo-stall-aliases",JSON.stringify(learnedStalls));saveStalls();
+  $("#reviewPanel").classList.add("hidden");
+  try{
+    const grouped=mergeOrders(parsed);
+    setProgress(76,"正在生成卡片",`共 ${Object.keys(grouped).length} 个档口`);
+    generatedCards=await generateCards(grouped);
+    setProgress(100,"生成完成",`${generatedCards.length} 张配货卡可以下载`);
+    updateDashboard(orders,grouped,generatedCards,fileName,sheetName);
+    pendingImport=null;input.value="";
+    setTimeout(()=>$("#progressCard").classList.add("hidden"),1300);
+  }catch(error){console.error(error);$("#progressCard").classList.add("hidden");toast(error.message||"生成失败");}
+});
 
 function normalizeSku(value){return safe(value).replace(/\s+/g,"").replace(/\d+个$/,"").toLowerCase();}
 function productKey(name){const clean=safe(name).replace(/\*\d+$/,"");const i=clean.search(/-xhs-|_/i);if(i<=0)return"";const prefix=clean.slice(0,i).replace(/\s+/g,"").toLowerCase();return/[a-f0-9]{12,}/i.test(prefix)?prefix:"";}
