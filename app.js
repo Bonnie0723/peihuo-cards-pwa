@@ -131,7 +131,9 @@ function suggestStall(order){
   const direct=ALIASES[raw.toUpperCase()]||raw;
   if(stallMap[direct.toUpperCase()])return direct.toUpperCase();
   const tokens=[order.stall,order.sku,order.code,order.multiName].flatMap(v=>safe(v).toUpperCase().split(/[^A-Z0-9\u4e00-\u9fff]+/)).filter(Boolean);
-  return Object.keys(stallMap).sort((a,b)=>b.length-a.length).find(name=>tokens.includes(name.toUpperCase()))||"";
+  const known=Object.keys(stallMap).sort((a,b)=>b.length-a.length).find(name=>tokens.includes(name.toUpperCase()));
+  if(known)return known;
+  return StallParser.extractStallCodeFromSku(order.sku);
 }
 function renderReview(){
   if(!pendingImport)return;
