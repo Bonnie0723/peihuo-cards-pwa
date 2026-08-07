@@ -75,25 +75,43 @@ function normalizePath(path){ const out=[]; path.split("/").forEach(p=>{if(p==="
 async function extractCellImages(data){
   const map={};
   const zip=await JSZip.loadAsync(data);
-  if(!zip.file("xl/cellimages.xml")||!zip.file("xl/_rels/cellimages.xml.rels")) return map;
   const parser=new DOMParser();
-  const relDoc=parser.parseFromString(await zip.file("xl/_rels/cellimages.xml.rels").async("text"),"application/xml");
-  const rels={}; [...relDoc.getElementsByTagNameNS("*","Relationship")].forEach(r=>rels[r.getAttribute("Id")]=r.getAttribute("Target"));
-  const cellDoc=parser.parseFromString(await zip.file("xl/cellimages.xml").async("text"),"application/xml");
-  const pics=[...cellDoc.getElementsByTagNameNS("*","pic")];
-  for(const pic of pics){
-    const prop=pic.getElementsByTagNameNS("*","cNvPr")[0], blip=pic.getElementsByTagNameNS("*","blip")[0];
-    if(!prop||!blip)continue;
-    const id=prop.getAttribute("name")||"";
-    const rid=blip.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships","embed")||blip.getAttribute("r:embed")||"";
-    const target=rels[rid]; if(!id||!target)continue;
-    const path=target.startsWith("xl/")?target:normalizePath(`xl/${target}`);
-    const entry=zip.file(path); if(!entry)continue;
-    const blob=await entry.async("blob"); map[id]=URL.createObjectURL(blob);
+
+  if(zip.file("xl/cellimages.xml")&&zip.file("xl/_rels/cellimages.xml.rels")){
+    const relDoc=parser.parseFromString(await zip.file("xl/_rels/cellimages.xml.rels").async("text"),"application/xml");
+    const rels={}; [...relDoc.getElementsByTagNameNS("*","Relationship")].forEach(r=>rels[r.getAttribute("Id")]=r.getAttribute("Target"));
+    const cellDoc=parser.parseFromString(await zip.file("xl/cellimages.xml").async("text"),"application/xml");
+    for(const pic of [...cellDoc.getElementsByTagNameNS("*","pic")]){
+      const prop=pic.getElementsByTagNameNS("*","cNvPr")[0], blip=pic.getElementsByTagNameNS("*","blip")[0];
+      if(!prop||!blip)continue;
+      const id=prop.getAttribute("name")||"";
+      const rid=blip.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships","embed")||blip.getAttribute("r:embed")||"";
+      const target=rels[rid]; if(!id||!target)continue;
+      const path=target.startsWith("xl/")?target:normalizePath(`xl/${target}`);
+      const entry=zip.file(path); if(!entry)continue;
+      map[id]=URL.createObjectURL(await entry.async("blob"));
+    }
+  }
+
+  const drawings=Object.keys(zip.files).filter(path=>/^xl\/drawings\/drawing\d+\.xml$/i.test(path));
+  for(const drawingPath of drawings){
+    const relPath=drawingPath.replace("xl/drawings/","xl/drawings/_rels/")+".rels";
+    if(!zip.file(relPath))continue;
+    const relDoc=parser.parseFromString(await zip.file(relPath).async("text"),"application/xml");
+    const rels={}; [...relDoc.getElementsByTagNameNS("*","Relationship")].forEach(r=>rels[r.getAttribute("Id")]=r.getAttribute("Target"));
+    const drawingDoc=parser.parseFromString(await zip.file(drawingPath).async("text"),"application/xml");
+    const anchors=[...drawingDoc.getElementsByTagNameNS("*","twoCellAnchor"),...drawingDoc.getElementsByTagNameNS("*","oneCellAnchor")];
+    for(const anchor of anchors){
+      const from=anchor.getElementsByTagNameNS("*","from")[0], blip=anchor.getElementsByTagNameNS("*","blip")[0];
+      const row=from?.getElementsByTagNameNS("*","row")[0]?.textContent;
+      const rid=blip?.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships","embed")||blip?.getAttribute("r:embed")||"";
+      const target=rels[rid]; if(row==null||!target)continue;
+      const path=normalizePath(`xl/drawings/${target}`), entry=zip.file(path);
+      if(entry)map[`row:${row}`]=URL.createObjectURL(await entry.async("blob"));
+    }
   }
   return map;
 }
-
 function readOrders(data,imageMap){
   const wb=XLSX.read(data,{type:"array",cellFormula:true});
   const sheetName=wb.SheetNames.at(-1), ws=wb.Sheets[sheetName];
@@ -108,7 +126,7 @@ function readOrders(data,imageMap){
     const cell=ws[XLSX.utils.encode_cell({r,c:ix["商品图片"]})];
     const formula=cell?.f?`=${cell.f}`:safe(row[ix["商品图片"]]);
     const id=(formula.match(/DISPIMG\("([^"]+)"/i)||[])[1]||"";
-    const item={orderNo:safe(row[ix["订单号"]]),spec:safe(row[ix["产品规格"]]),qty:Math.max(1,parseInt(row[ix["单个产品数量"]])||1),multiName:safe(row[ix["多品名"]]),sku:ix["商品SKU"]==null?"":safe(row[ix["商品SKU"]]),stall:safe(row[ix["商品名称"]]),code:ix["商品编码"]==null?"":safe(row[ix["商品编码"]]),imageId:id,image:imageMap[id]||""};
+    const item={orderNo:safe(row[ix["订单号"]]),spec:safe(row[ix["产品规格"]]),qty:Math.max(1,parseInt(row[ix["单个产品数量"]])||1),multiName:safe(row[ix["多品名"]]),sku:ix["商品SKU"]==null?"":safe(row[ix["商品SKU"]]),stall:safe(row[ix["商品名称"]]),code:ix["商品编码"]==null?"":safe(row[ix["商品编码"]]),imageId:id,image:imageMap[id]||imageMap[`row:${r}`]||""};
     if(item.orderNo||item.spec||item.multiName||item.sku||item.stall||formula)orders.push(item);
   }
   if(!orders.length)throw new Error("最后一个 Sheet 没有订单行");
