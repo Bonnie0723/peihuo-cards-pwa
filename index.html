@@ -8,7 +8,7 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./app-icon.png" />
     <link rel="apple-touch-icon" href="./app-icon.png" />
-    <link rel="stylesheet" href="./styles.css?v=7" />
+    <link rel="stylesheet" href="./styles.css?v=8" />
     <link rel="stylesheet" href="./theme.css" />
     <title>配货喵</title>
   </head>
@@ -21,8 +21,6 @@
         </header>
 
         <div class="greeting"><h1>今天也要轻松配货呀 <span class="pixel-heart" aria-hidden="true"></span></h1></div>
-
-        <div class="batch-bar"><div><strong>当前配货批次</strong><p id="batchStatus">正在读取本机批次…</p></div><button id="newBatch" type="button">＋ 新建批次</button></div>
 
         <label class="upload-card" id="dropZone">
           <div class="cat-box" aria-hidden="true"><img src="./mascot-kitty.png" alt="" /></div>
@@ -76,7 +74,7 @@
         <div class="settings-card"><div><strong>安装到手机</strong><p>像普通 App 一样从桌面打开</p></div><button id="installButton">安装 PWA</button></div>
         <div class="settings-card"><div><strong>安全合并模式</strong><p>宁可拆开，也不合并不同商品编码</p></div><span class="toggle on">已开启</span></div>
         <div class="settings-card"><div><strong>本地处理</strong><p>Excel 与商品图片不会上传服务器</p></div><span class="safe-badge">✓ 安全</span></div>
-        <div class="about-card"><img src="./app-icon.png" alt="配货喵" /><h2>配货喵</h2><p>把跨境订单变成一眼能看懂的配货卡。</p><small>版本 1.2.0</small></div>
+        <div class="about-card"><img src="./app-icon.png" alt="配货喵" /><h2>配货喵</h2><p>把跨境订单变成一眼能看懂的配货卡。</p><small>版本 1.1.0</small></div>
       </section>
     </main>
 
@@ -90,6 +88,6 @@
     <div id="toast" class="toast" role="status"></div>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-    <script defer src="./app.js?v=7"></script>
+    <script defer src="./app.js?v=8"></script>
   </body>
 </html>
