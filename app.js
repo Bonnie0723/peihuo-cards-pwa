@@ -42,16 +42,6 @@ function renderHistory(){
 }
 function escapeHtml(s){ return safe(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function escapeAttr(s){ return safe(s).replace(/[\\']/g,"\\$&"); }
-const BATCH_DB="peihuo-batches", BATCH_STORE="state";
-function openBatchDb(){return new Promise((resolve,reject)=>{const request=indexedDB.open(BATCH_DB,1);request.onupgradeneeded=()=>request.result.createObjectStore(BATCH_STORE);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});}
-async function getActiveBatch(){const db=await openBatchDb();return new Promise((resolve,reject)=>{const tx=db.transaction(BATCH_STORE,"readonly"),request=tx.objectStore(BATCH_STORE).get("active");request.onsuccess=()=>resolve(request.result||null);request.onerror=()=>reject(request.error);tx.oncomplete=()=>db.close();});}
-async function putActiveBatch(value){const db=await openBatchDb();return new Promise((resolve,reject)=>{const tx=db.transaction(BATCH_STORE,"readwrite");tx.objectStore(BATCH_STORE).put(value,"active");tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>reject(tx.error);});}
-async function clearActiveBatch(){const db=await openBatchDb();return new Promise((resolve,reject)=>{const tx=db.transaction(BATCH_STORE,"readwrite");tx.objectStore(BATCH_STORE).delete("active");tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>reject(tx.error);});}
-async function storeRows(rows){return Promise.all(rows.map(async row=>{const {_imageBlob,...copy}=row;let imageBlob=_imageBlob||null;if(!imageBlob&&copy.image){try{imageBlob=await (await fetch(copy.image)).blob();}catch{}}copy.image="";return{...copy,imageBlob};}));}
-function restoreRows(rows){return rows.map(row=>{const {imageBlob,...copy}=row;return{...copy,image:imageBlob?URL.createObjectURL(imageBlob):"",_imageBlob:imageBlob||null};});}
-async function refreshBatchStatus(){try{const batch=await getActiveBatch();$("#batchStatus").textContent=batch?("当前批次："+batch.rows.length+" 条 · 已上传 "+batch.fileNames.length+" 次"):"当前没有批次，上传后自动创建";}catch{$("#batchStatus").textContent="当前批次保存在本机";}}
-async function saveActiveBatch(rows,fileNames){const old=await getActiveBatch();await putActiveBatch({createdAt:old?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString(),fileNames,rows:await storeRows(rows)});await refreshBatchStatus();}
-$("#newBatch").addEventListener("click",async()=>{const batch=await getActiveBatch();if(batch?.rows.length&&!confirm("新建批次会结束当前 "+batch.rows.length+" 条订单，确定吗？"))return;await clearActiveBatch();pendingImport=null;generatedCards.forEach(c=>URL.revokeObjectURL(c.url));generatedCards=[];$("#reviewPanel").classList.add("hidden");$("#recentCards").innerHTML="";$("#recentEmpty").classList.remove("hidden");$("#downloadAll").classList.add("hidden");["orderCount","stallCount","cardCount"].forEach(id=>$("#"+id).textContent="0");input.value="";await refreshBatchStatus();toast("已新建空白批次");});
 
 const input=$("#orderInput"), drop=$("#dropZone");
 input.addEventListener("change",()=>input.files[0]&&processFile(input.files[0]));
@@ -71,10 +61,8 @@ async function processFile(file){
     const {orders,sheetName}=readOrders(data,imageMap);
     setProgress(61,"正在安全合并","商品SKU → 多品名主编码 → 图片ID");
     const parsed=orders.map(o=>parseOrder({...o,stall:suggestStall(o)}));
-    const active=await getActiveBatch(), previous=active?restoreRows(active.rows):[];
-    const combined=[...previous,...parsed], fileNames=[...(active?.fileNames||[]),file.name];
-    pendingImport={orders:combined,parsed:combined,fileName:fileNames.join(" + "),fileNames,sheetName};
-    setProgress(70,"已追加到当前批次","本次 "+parsed.length+" 条 · 当前共 "+combined.length+" 条，请审核档口");
+    pendingImport={orders,parsed,fileName:file.name,sheetName};
+    setProgress(70,"解析完成","请逐条确认档口后再生成卡片");
     renderReview();
     setTimeout(()=>$("#progressCard").classList.add("hidden"),700);
   }catch(error){ console.error(error); $("#progressCard").classList.add("hidden"); toast(error.message||"生成失败，请检查订单文件"); }
@@ -167,7 +155,6 @@ $("#generateReviewed").addEventListener("click",async()=>{
     if(!stallMap[stall])stallMap[stall]="其他";
   });
   localStorage.setItem("peihuo-stall-aliases",JSON.stringify(learnedStalls));saveStalls();
-  await saveActiveBatch(parsed,pendingImport.fileNames||[fileName]);
   $("#reviewPanel").classList.add("hidden");
   try{
     const grouped=mergeOrders(parsed);
@@ -225,5 +212,5 @@ $("#downloadAll").addEventListener("click",async()=>{if(!generatedCards.length)r
 window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();installPrompt=e;});
 $("#installButton").addEventListener("click",async()=>{if(installPrompt){installPrompt.prompt();await installPrompt.userChoice;installPrompt=null;}else toast("请在浏览器菜单中选择“安装应用”或“添加到主屏幕”");});
 function updateNetwork(){ $("#networkText").textContent=navigator.onLine?"离线可用":"当前离线"; }
-addEventListener("online",updateNetwork);addEventListener("offline",updateNetwork);updateNetwork();renderStalls();renderHistory();refreshBatchStatus();
+addEventListener("online",updateNetwork);addEventListener("offline",updateNetwork);updateNetwork();renderStalls();renderHistory();
 if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("./sw.js"));
