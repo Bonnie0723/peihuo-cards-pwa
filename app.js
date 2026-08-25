@@ -14,6 +14,32 @@ const safe = value => value == null ? "" : String(value).trim();
 let stallMap = JSON.parse(localStorage.getItem("peihuo-stalls") || "null") || {...DEFAULT_STALLS};
 let generatedCards = [];
 let installPrompt = null;
+const ORDER_DB_NAME = "peihuo-local-orders";
+const ORDER_STORE_NAME = "uploads";
+
+function localDateKey(date=new Date()){
+  return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
+}
+function openOrderDb(){
+  return new Promise((resolve,reject)=>{
+    const request=indexedDB.open(ORDER_DB_NAME,1);
+    request.onupgradeneeded=()=>{ const db=request.result; if(!db.objectStoreNames.contains(ORDER_STORE_NAME)){const store=db.createObjectStore(ORDER_STORE_NAME,{keyPath:"id",autoIncrement:true});store.createIndex("date","date");} };
+    request.onsuccess=()=>resolve(request.result);
+    request.onerror=()=>reject(request.error||new Error("无法打开本地订单库"));
+  });
+}
+async function getTodayUploads(){
+  const db=await openOrderDb();
+  return new Promise((resolve,reject)=>{const tx=db.transaction(ORDER_STORE_NAME,"readonly"),request=tx.objectStore(ORDER_STORE_NAME).index("date").getAll(localDateKey());request.onsuccess=()=>resolve(request.result.sort((a,b)=>a.createdAt-b.createdAt));request.onerror=()=>reject(request.error);tx.oncomplete=()=>db.close();});
+}
+async function saveTodayUpload(file,data){
+  const db=await openOrderDb();
+  return new Promise((resolve,reject)=>{const tx=db.transaction(ORDER_STORE_NAME,"readwrite");tx.objectStore(ORDER_STORE_NAME).add({date:localDateKey(),name:file.name,createdAt:Date.now(),data});tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};});
+}
+async function clearTodayUploads(){
+  const uploads=await getTodayUploads(),db=await openOrderDb();
+  return new Promise((resolve,reject)=>{const tx=db.transaction(ORDER_STORE_NAME,"readwrite"),store=tx.objectStore(ORDER_STORE_NAME);uploads.forEach(item=>store.delete(item.id));tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};});
+}
 
 function saveStalls(){ localStorage.setItem("peihuo-stalls", JSON.stringify(stallMap)); }
 function toast(message){ const el=$("#toast"); el.textContent=message; el.classList.add("show"); clearTimeout(toast.timer); toast.timer=setTimeout(()=>el.classList.remove("show"),2600); }
@@ -53,23 +79,36 @@ async function processFile(file){
     setProgress(8,"正在读取订单",file.name);
     await nextFrame();
     const data=await file.arrayBuffer();
-    setProgress(20,"正在提取商品图片","解析 WPS / 飞书内嵌图片");
-    const imageMap=await extractCellImages(data);
-    setProgress(42,"正在解析订单","检查表头、数量和商品编码");
-    const {orders,sheetName}=readOrders(data,imageMap);
+    const previousUploads=await getTodayUploads();
+    setProgress(20,"正在提取商品图片",previousUploads.length?`追加到今日已有 ${previousUploads.length} 个文件`:"解析 WPS / 飞书内嵌图片");
+    const batches=[];
+    for(const upload of previousUploads)batches.push(await readOrderBatch(upload.data));
+    const currentBatch=await readOrderBatch(data);
+    batches.push(currentBatch);
+    const orders=batches.flatMap(batch=>batch.orders);
+    const sheetName=currentBatch.sheetName;
+    setProgress(42,"正在解析订单",`本次 ${currentBatch.orders.length} 行，今日累计 ${orders.length} 行`);
     setProgress(61,"正在安全合并","商品SKU → 多品名主编码 → 图片ID");
     const parsed=orders.map(parseOrder);
     const grouped=mergeOrders(parsed);
     const unknown=[...new Set(parsed.filter(x=>!stallMap[x.stall.toUpperCase()]).map(x=>x.stall))];
     if(unknown.length) toast(`${unknown.length} 个档口未映射，已归入“其他”`);
     setProgress(76,"正在生成卡片",`共 ${Object.keys(grouped).length} 个档口`);
+    releaseGeneratedCards();
     generatedCards=await generateCards(grouped);
     setProgress(100,"生成完成",`${generatedCards.length} 张配货卡可以下载`);
-    updateDashboard(orders,grouped,generatedCards,file.name,sheetName);
+    await saveTodayUpload(file,data);
+    updateDashboard(orders,grouped,generatedCards,file.name,sheetName,currentBatch.orders.length,previousUploads.length+1);
+    input.value="";
     setTimeout(()=>$("#progressCard").classList.add("hidden"),1300);
   }catch(error){ console.error(error); $("#progressCard").classList.add("hidden"); toast(error.message||"生成失败，请检查订单文件"); }
 }
 const nextFrame=()=>new Promise(resolve=>requestAnimationFrame(resolve));
+
+async function readOrderBatch(data){
+  const imageMap=await extractCellImages(data);
+  return readOrders(data,imageMap);
+}
 
 function normalizePath(path){ const out=[]; path.split("/").forEach(p=>{if(p==="..")out.pop();else if(p&&p!==".")out.push(p);});return out.join("/"); }
 async function extractCellImages(data){
@@ -168,15 +207,34 @@ async function drawCard(floor,stall,total,page,pages,items){
 }
 async function generateCards(grouped){const cards=[];const stalls=Object.keys(grouped).sort((a,b)=>{const fa=stallMap[a.toUpperCase()]||"其他",fb=stallMap[b.toUpperCase()]||"其他";return FLOORS.indexOf(fa)-FLOORS.indexOf(fb)||a.localeCompare(b);});for(let si=0;si<stalls.length;si++){const stall=stalls[si],items=grouped[stall],floor=stallMap[stall.toUpperCase()]||"其他",total=items.reduce((n,i)=>n+Object.values(i.models).reduce((a,b)=>a+b,0),0),chunks=[];for(let i=0;i<items.length;i+=4)chunks.push(items.slice(i,i+4));for(let p=0;p<chunks.length;p++){setProgress(76+Math.round(((si+p/chunks.length)/stalls.length)*22),"正在生成卡片",`${floor} · ${stall}`);const image=await drawCard(floor,stall,total,p+1,chunks.length,chunks[p]);cards.push({floor,stall,total,page:p+1,pages:chunks.length,count:chunks[p].length,...image,filename:`${String(cards.length+1).padStart(2,"0")}_${floor}_档口${stall}${chunks.length>1?`_${p+1}`:""}.png`});await nextFrame();}}return cards;}
 
-function updateDashboard(orders,grouped,cards,fileName,sheetName){
+function updateDashboard(orders,grouped,cards,fileName,sheetName,addedOrders=orders.length,fileCount=1,writeHistory=true){
   $("#orderCount").textContent=orders.length;$("#stallCount").textContent=Object.keys(grouped).length;$("#cardCount").textContent=cards.length;$("#recentEmpty").classList.toggle("hidden",cards.length>0);$("#downloadAll").classList.toggle("hidden",!cards.length);
   $("#recentCards").innerHTML=cards.slice(0,3).map((c,i)=>`<article class="result-card"><img src="${c.url}" alt="配货卡预览"><div class="result-main"><h3>${escapeHtml(c.floor)} · ${escapeHtml(c.stall)} · ${c.total}件</h3><p>${c.count} 个商品 · 第 ${c.page}/${c.pages} 页</p><div class="result-actions"><a href="${c.url}" download="${escapeHtml(c.filename)}">下载卡片</a></div></div></article>`).join("");
-  const history=JSON.parse(localStorage.getItem("peihuo-history")||"[]");history.unshift({name:fileName,time:new Date().toLocaleString("zh-CN"),sheet:sheetName,orders:orders.length,stalls:Object.keys(grouped).length,cards:cards.length});localStorage.setItem("peihuo-history",JSON.stringify(history.slice(0,30)));renderHistory();toast(`完成：${cards.length} 张配货卡`);
+  if(writeHistory){const history=JSON.parse(localStorage.getItem("peihuo-history")||"[]");history.unshift({name:fileName,time:new Date().toLocaleString("zh-CN"),sheet:sheetName,orders:addedOrders,stalls:Object.keys(grouped).length,cards:cards.length});localStorage.setItem("peihuo-history",JSON.stringify(history.slice(0,30)));renderHistory();toast(`已追加 ${addedOrders} 行 · 今日 ${fileCount} 个文件，共 ${orders.length} 行`);}
 }
+function releaseGeneratedCards(){generatedCards.forEach(card=>card.url&&URL.revokeObjectURL(card.url));generatedCards=[];}
+async function restoreToday(){
+  try{
+    const uploads=await getTodayUploads();if(!uploads.length)return;
+    setProgress(12,"正在恢复今日订单",`${uploads.length} 个已上传文件`);
+    const batches=[];for(const upload of uploads)batches.push(await readOrderBatch(upload.data));
+    const orders=batches.flatMap(batch=>batch.orders),parsed=orders.map(parseOrder),grouped=mergeOrders(parsed);
+    releaseGeneratedCards();generatedCards=await generateCards(grouped);
+    updateDashboard(orders,grouped,generatedCards,"今日累计",batches.at(-1)?.sheetName||"",0,uploads.length,false);
+    setProgress(100,"今日订单已恢复",`${uploads.length} 个文件 · ${orders.length} 行订单`);
+    setTimeout(()=>$("#progressCard").classList.add("hidden"),900);
+  }catch(error){console.error(error);$("#progressCard").classList.add("hidden");toast("今日订单恢复失败，可重新上传文件");}
+}
+$("#clearToday").addEventListener("click",async()=>{
+  const uploads=await getTodayUploads();if(!uploads.length){toast("今天还没有累计订单");return;}
+  if(!confirm(`清空今天累计的 ${uploads.length} 个订单文件？档口映射和历史记录不会受影响。`))return;
+  await clearTodayUploads();releaseGeneratedCards();$("#orderCount").textContent="0";$("#stallCount").textContent="0";$("#cardCount").textContent="0";$("#recentCards").innerHTML="";$("#recentEmpty").classList.remove("hidden");$("#downloadAll").classList.add("hidden");toast("今日累计订单已清空");
+});
 $("#downloadAll").addEventListener("click",async()=>{if(!generatedCards.length)return;const zip=new JSZip();generatedCards.forEach(c=>zip.file(c.filename,c.blob));const blob=await zip.generateAsync({type:"blob"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`配货卡_${new Date().toISOString().slice(0,10)}.zip`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);});
 
 window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();installPrompt=e;});
 $("#installButton").addEventListener("click",async()=>{if(installPrompt){installPrompt.prompt();await installPrompt.userChoice;installPrompt=null;}else toast("请在浏览器菜单中选择“安装应用”或“添加到主屏幕”");});
 function updateNetwork(){ $("#networkText").textContent=navigator.onLine?"离线可用":"当前离线"; }
-addEventListener("online",updateNetwork);addEventListener("offline",updateNetwork);updateNetwork();renderStalls();renderHistory();
+addEventListener("online",updateNetwork);addEventListener("offline",updateNetwork);updateNetwork();renderStalls();renderHistory();restoreToday();
 if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("./sw.js"));
+
