@@ -192,7 +192,7 @@ function mergeOrders(items){
   Object.entries(stalls).forEach(([stall,rows])=>{const map=new Map();rows.forEach(i=>{
     // A model-specific SKU must not split one physical product into several cards.
     // Prefer the parent product id, then the shared workbook image; SKU is only a fallback.
-    const identity=i.productKey?`P|${i.productKey}`:i.imageId?`I|${i.imageId}`:i.skuNorm?`S|${i.skuNorm}`:`N|${i.style}|${i.specCn}`;
+    const identity=i.productKey?`P|${i.productKey}`:i.imageId?`I|${i.imageId}`:`N|${i.style}|${i.specCn}`;
     const key=`${identity}|${i.style}|${i.specCn}|${i.remark}`;
     if(!map.has(key))map.set(key,{...i,models:{},orderNos:[],skus:[]});const g=map.get(key);g.models[i.model]=(g.models[i.model]||0)+i.qty;if(i.orderNo)g.orderNos.push(i.orderNo);if(i.sku&&!g.skus.includes(i.sku))g.skus.push(i.sku);if(!g.image&&i.image)g.image=i.image;
   });result[stall]=[...map.values()];});return result;
