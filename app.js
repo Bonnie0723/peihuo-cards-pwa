@@ -89,7 +89,7 @@ async function processFile(file){
     const orders=batches.flatMap(batch=>batch.orders);
     const sheetName=currentBatch.sheetName;
     setProgress(42,"正在解析订单",`本次 ${currentBatch.orders.length} 行，今日累计 ${orders.length} 行`);
-    setProgress(61,"正在安全合并","商品SKU → 多品名主编码 → 图片ID");
+    setProgress(61,"正在安全合并","同款式同规格合并型号，同一 SKU 系列排在一起");
     const parsed=orders.map(parseOrder);
     const grouped=mergeOrders(parsed);
     const unknown=[...new Set(parsed.filter(x=>!stallMap[x.stall.toUpperCase()]).map(x=>x.stall))];
@@ -111,18 +111,63 @@ function withTimeout(promise,ms,message){
 }
 
 async function readOrderBatch(data){
-  const imageMap=await extractCellImages(data);
-  setProgress(38,"正在读取订单行","图片已提取，正在解析最后一个工作表");
+  setProgress(20,"正在打开订单文件","只读取最新的非空订单页");
   await nextFrame();
-  return readOrders(data,imageMap);
+  const zip=await withTimeout(JSZip.loadAsync(data),60000,"订单文件解压超时");
+  const parser=new DOMParser();
+  async function xml(path){
+    const entry=zip.file(path);if(!entry)throw new Error(`文件缺少 ${path}`);
+    const doc=parser.parseFromString(await entry.async("text"),"application/xml");
+    if(doc.getElementsByTagName("parsererror").length)throw new Error(`无法解析 ${path}`);
+    return doc;
+  }
+  const nodes=(doc,name)=>[...doc.getElementsByTagNameNS("*",name)];
+  const workbook=await xml("xl/workbook.xml"),rels=await xml("xl/_rels/workbook.xml.rels");
+  const targets=Object.fromEntries(nodes(rels,"Relationship").map(n=>[n.getAttribute("Id"),n.getAttribute("Target")]));
+  const shared=zip.file("xl/sharedStrings.xml")?nodes(await xml("xl/sharedStrings.xml"),"si").map(n=>nodes(n,"t").map(t=>t.textContent).join("")):[];
+  let batch,selectedPath;const skipped=[];
+  for(const sheet of nodes(workbook,"sheet").reverse()){
+    const name=sheet.getAttribute("name")||"";
+    try{
+      const rid=sheet.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships","id");
+      const target=targets[rid];if(!target){skipped.push(`${name}(缺少引用)`);continue;}
+      const path=normalizePath(target.startsWith("/")?target:`xl/${target}`);
+      const doc=await xml(path),ws={};let lastRow=0,lastCol=0;
+      for(const cell of nodes(doc,"c")){
+        const address=cell.getAttribute("r"),type=cell.getAttribute("t");
+        const raw=nodes(cell,"v")[0]?.textContent;
+        const formula=nodes(cell,"f")[0]?.textContent;
+        const value=type==="s"?(shared[Number(raw)]||""):type==="inlineStr"?nodes(cell,"t").map(n=>n.textContent).join(""):raw;
+        if(!address||((value==null||value==="")&&!formula))continue;
+        ws[address]={t:"s",v:value||"",...(formula?{f:formula}:{})};
+        const pos=XLSX.utils.decode_cell(address);lastRow=Math.max(lastRow,pos.r);lastCol=Math.max(lastCol,pos.c);
+      }
+      if(lastRow===0)continue;
+      ws["!ref"]=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:lastRow,c:lastCol}});
+      setProgress(22,"正在查找订单页",`正在检查工作表 ${name}`);
+      await nextFrame();
+      batch=readOrders(null,{}, {SheetNames:[name],Sheets:{[name]:ws}});
+      selectedPath=path;break;
+    }catch(error){
+      // 末尾的工作表可能只是残留表或非订单表，跳过并继续往前找真正的订单页。
+      skipped.push(`${name}(${error.message||"无法读取"})`);
+      await nextFrame();
+    }
+  }
+  if(!batch)throw new Error(`没有找到可用的订单工作表${skipped.length?`：${skipped.slice(-3).join("、")}`:""}`);
+  setProgress(24,"正在提取商品图片",`${batch.sheetName} · ${batch.orders.length} 行订单`);
+  const wanted=new Set(batch.orders.map(o=>o.imageId).filter(Boolean));
+  const images=await extractCellImages(zip,wanted,selectedPath);
+  batch.orders.forEach(o=>{o.image=images[o.imageId]||images[`row:${o.sourceRow}`]||"";});
+  return batch;
 }
 
 function normalizePath(path){ const out=[]; path.split("/").forEach(p=>{if(p==="..")out.pop();else if(p&&p!==".")out.push(p);});return out.join("/"); }
-async function extractCellImages(data){
+async function extractCellImages(data,wanted,selectedPath){
   const map={};
   setProgress(20,"正在解压订单文件","大文件需要较长时间，请保持页面打开");
   await nextFrame();
-  const zip=await withTimeout(JSZip.loadAsync(data),60000,"订单文件解压超过60秒，请重试或提供原Excel排查");
+  const zip=data && typeof data.file==="function"?data:await withTimeout(JSZip.loadAsync(data),60000,"订单文件解压超时");
   const imageCache=new Map();
   let extracted=0;
   async function imageUrl(path){
@@ -147,6 +192,7 @@ async function extractCellImages(data){
       const prop=pic.getElementsByTagNameNS("*","cNvPr")[0], blip=pic.getElementsByTagNameNS("*","blip")[0];
       if(!prop||!blip)continue;
       const id=prop.getAttribute("name")||"";
+      if(wanted&&!wanted.has(id))continue;
       const rid=blip.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships","embed")||blip.getAttribute("r:embed")||"";
       const target=rels[rid]; if(!id||!target)continue;
       const path=target.startsWith("xl/")?target:normalizePath(`xl/${target}`);
@@ -155,7 +201,18 @@ async function extractCellImages(data){
     }
   }
 
-  const drawings=Object.keys(zip.files).filter(path=>/^xl\/drawings\/drawing\d+\.xml$/i.test(path));
+  let drawings=Object.keys(zip.files).filter(path=>/^xl\/drawings\/drawing\d+\.xml$/i.test(path));
+  if(selectedPath){
+    const relPath=selectedPath.replace(/([^/]+)$/,"_rels/$1.rels");
+    drawings=[];
+    if(zip.file(relPath)){
+      const doc=parser.parseFromString(await zip.file(relPath).async("text"),"application/xml");
+      drawings=[...doc.getElementsByTagNameNS("*","Relationship")].filter(r=>/\/drawing$/.test(r.getAttribute("Type"))).map(r=>{
+        const target=r.getAttribute("Target");
+        return normalizePath(target.startsWith("/")?target:selectedPath.slice(0,selectedPath.lastIndexOf("/")+1)+target);
+      });
+    }
+  }
   for(const drawingPath of drawings){
     const relPath=drawingPath.replace("xl/drawings/","xl/drawings/_rels/")+".rels";
     if(!zip.file(relPath))continue;
@@ -174,8 +231,8 @@ async function extractCellImages(data){
   }
   return map;
 }
-function readOrders(data,imageMap){
-  const wb=XLSX.read(data,{type:"array",cellFormula:true});
+function readOrders(data,imageMap,workbook){
+  const wb=workbook||XLSX.read(data,{type:"array",cellFormula:true});
   const sheetName=wb.SheetNames.at(-1), ws=wb.Sheets[sheetName];
   // Ignore formatting-only cells that can expand !ref to a million empty rows.
   const cells=Object.keys(ws).filter(key=>/^[A-Z]+[1-9][0-9]*$/.test(key)&& (ws[key].v!=null||ws[key].f));
@@ -193,10 +250,13 @@ function readOrders(data,imageMap){
     const cell=ws[XLSX.utils.encode_cell({r,c:ix["商品图片"]})];
     const formula=cell?.f?`=${cell.f}`:safe(row[ix["商品图片"]]);
     const id=(formula.match(/DISPIMG\("([^"]+)"/i)||[])[1]||"";
-    const item={orderNo:safe(row[ix["订单号"]]),orderNoLast4:safe(row[ix["订单号"]]).slice(-4),spec:safe(row[ix["产品规格"]]),qty:Math.max(1,parseInt(row[ix["单个产品数量"]])||1),multiName:safe(row[ix["多品名"]]),sku:skuColumn==null?"":safe(row[skuColumn]),stall:safe(row[ix["商品名称"]]),code:ix["商品编码"]==null?"":safe(row[ix["商品编码"]]),imageId:id,image:imageMap[id]||imageMap[`row:${r}`]||""};
+    // 部分导出文件把订单号放在表头之外的另一列（例如 J 列），且 A 列为空格，这里做兜底识别。
+    let orderNo=safe(row[ix["订单号"]]);
+    if(!orderNo)orderNo=safe(row.find(value=>/^\d{6}[A-Z0-9]{6,}$/i.test(safe(value))));
+    const item={sourceRow:r,orderNo,orderNoLast4:orderNo.slice(-4),spec:safe(row[ix["产品规格"]]),qty:Math.max(1,parseInt(row[ix["单个产品数量"]])||1),multiName:safe(row[ix["多品名"]]),sku:skuColumn==null?"":safe(row[skuColumn]),stall:safe(row[ix["商品名称"]]),code:ix["商品编码"]==null?"":safe(row[ix["商品编码"]]),imageId:id,image:imageMap[id]||imageMap[`row:${r}`]||""};
     if(item.orderNo||item.spec||item.multiName||item.sku||item.stall||formula)orders.push(item);
   }
-  if(!orders.length)throw new Error("最后一个 Sheet 没有订单行");
+  if(!orders.length)throw new Error("该工作表没有订单行");
   return {orders,sheetName};
 }
 
@@ -213,17 +273,45 @@ function extractModel(spec,name){
 }
 const TRANSLATIONS=[["เปลือกแม่เหล็กเดี่ยวไม่มีอุปกรณ์เสริม","磁吸单壳(无配件)"],["เปลือกหอยเดี่ยวไม่มีอุปกรณ์เสริม","单壳(无配件)"],["ตัวเรือน + เปลือก + ตัวยึด","壳+支架"],["เปลือกแม่เหล็ก + ตัวยึดแม่เหล็ก","磁吸壳+磁吸支架"],["ตัวยึดเปลือก + แม่เหล็ก","壳+磁吸支架"],["เปลือกแม่เหล็ก + ตัวยึด","磁吸壳+支架"],["ตัวเครื่อง + เปลือก + โซ่","壳+链条"],["เปลือกเดี่ยว + เชือกเส้นเล็ก","单壳+细绳"],["Vỏ từ tính + Giá đỡ","磁吸壳+支架"],["Vỏ đơn từ tính","磁吸单壳"],["เปลือกแม่เหล็กเดี่ยว","磁吸单壳"],["เปลือกเดี่ยว","单壳"],["เปลือกหอย","壳"],["เปลือก","壳"],["เชลล์","壳"],["ตัวเรือน","壳体"],["ตัวเครื่อง","壳体"],["ตัวยึด","支架"],["โซ่","链条"],["แม่เหล็ก","磁吸"],["สีขาว","白色"],["สีน้ำตาล","棕色"],["ดอกไม้","花朵"],["หัวใจ","爱心"],["Single Shell","单壳"],["Vỏ đơn","单壳"]].sort((a,b)=>b[0].length-a[0].length);
 function translateSpec(spec){let s=safe(spec).replace(/^option:\s*/i,"").replace(/Warehouse:.*$/is,"");s=s.replace(/i?Phone\s*\d{1,2}\s*(Pro\s*Max|Pro|promax)?/gi,"").replace(/(?:^|[,，\s])(13|14|15|16|17|18)\s*(Pro\s*Max|Pro|promax|PM|P)?(?:[,，\s]|$)/gi," ").replace(/Airpods?\s*\d?\s*代?/gi,"");TRANSLATIONS.forEach(([a,b])=>s=s.split(a).join(b));return s.replace(/[^\u4e00-\u9fffA-Za-z0-9+\-()（）【】×➕.,， ]/g," ").replace(/\s+/g," ").replace(/^[+,，\s]+|[+,，\s]+$/g,"");}
-function styleName(name,stall){const clean=safe(name).replace(/\*\d+$/,"");const pieces=clean.split(/[-_]/).map(x=>x.trim()).filter(Boolean).filter(p=>!(/^[a-f0-9]{10,}$/i.test(p)||p.toUpperCase()===stall.toUpperCase()||p.toLowerCase()==="xhs"||/^(i?Phone\s*)?\d{1,2}\s*(pro|promax|pro\s*max)?$/i.test(p)||/^\d{1,3}$/.test(p)));const meaningful=pieces.filter(p=>/[\u4e00-\u9fff【】]/.test(p));return meaningful.join("_")||translateSpec(clean)||"未识别款式";}
-function parseOrder(o){const stall=(ALIASES[o.stall]||o.stall||"未标注档口").trim();const remark=/缺|整套/.test(o.spec)?o.spec:"";const specCn=remark?"":translateSpec(o.spec);return{stall,style:styleName(o.multiName,stall),sku:o.sku,skuNorm:normalizeSku(o.sku),productKey:productKey(o.multiName),model:extractModel(o.spec,o.multiName),specCn,qty:o.qty,remark,orderNo:o.orderNo,imageId:o.imageId,image:o.image};}
+function styleName(name,stall){const clean=safe(name).replace(/\*\d+$/,"");const pieces=clean.split(/[-_]/).map(x=>x.trim()).filter(Boolean).filter(p=>!(/^[a-f0-9]{10,}$/i.test(p)||p.toUpperCase()===stall.toUpperCase()||p.toLowerCase()==="xhs"||/^(i?Phone\s*)?\d{1,2}\s*(pro|promax|pro\s*max)?$/i.test(p)||/^\d{1,3}$/.test(p)));const meaningful=pieces.filter(p=>/[\u4e00-\u9fff【】]/.test(p));return meaningful.join("_")||pieces.join("-")||translateSpec(clean)||"未识别款式";}
+// SKU 系列编码：优先多品名/商品SKU 里的 24 位货号，其次取款式名前缀（去掉末尾加密串、数字、型号）。
+function seriesKey(o){
+  const raw=safe(o.sku)||safe(o.multiName);
+  const clean=raw.replace(/\*\d+\s*$/,"").trim();
+  const hex=(clean.match(/[0-9a-f]{24}/i)||[])[0];
+  if(hex)return hex.toLowerCase();
+  const keep=[];
+  for(const part of clean.split(/[-_]/).map(x=>x.trim()).filter(Boolean)){
+    if(/^\d+$/.test(part)||part.includes("*")||/^[0-9a-f]{8,}$/i.test(part))break;
+    if(keep.length&&/^(i?phone\s*\d|apple|airpods?|\d{1,2}\s*(pro|promax|pm|pro max)?$)/i.test(part))break;
+    keep.push(part);
+  }
+  return (keep.join("-")||clean||"未识别").toLowerCase();
+}
+function parseOrder(o){const stall=(ALIASES[o.stall]||o.stall||"未标注档口").trim();const remark=/缺|整套/.test(o.spec)?o.spec:"";const specCn=remark?"":translateSpec(o.spec);return{stall,style:styleName(o.multiName,stall),sku:o.sku,skuNorm:normalizeSku(o.sku),productKey:productKey(o.multiName),series:seriesKey(o),model:extractModel(o.spec,o.multiName),specCn,qty:o.qty,remark,orderNo:o.orderNo,imageId:o.imageId,image:o.image};}
 function mergeOrders(items){
   const stalls={};items.forEach(i=>(stalls[i.stall]||=[]).push(i));const result={};
-  Object.entries(stalls).forEach(([stall,rows])=>{const map=new Map();rows.forEach(i=>{
-    // A model-specific SKU must not split one physical product into several cards.
-    // Prefer the parent product id, then the shared workbook image; SKU is only a fallback.
-    const identity=i.productKey?`P|${i.productKey}`:i.imageId?`I|${i.imageId}`:`N|${i.style}|${i.specCn}`;
-    const key=`${identity}|${i.style}|${i.specCn}|${i.remark}`;
-    if(!map.has(key))map.set(key,{...i,models:{},orderNos:[],skus:[]});const g=map.get(key);g.models[i.model]=(g.models[i.model]||0)+i.qty;if(i.orderNo)g.orderNos.push(i.orderNo);if(i.sku&&!g.skus.includes(i.sku))g.skus.push(i.sku);if(!g.image&&i.image)g.image=i.image;
-  });result[stall]=[...map.values()];});return result;
+  Object.entries(stalls).forEach(([stall,rows])=>{
+    const map=new Map(),seriesOrder=new Map();
+    rows.forEach((i,index)=>{
+      const series=i.series||seriesKey(i);
+      if(!seriesOrder.has(series))seriesOrder.set(series,index);
+      // 同一款式就是同一件实物：型号累加合并成一行。
+      // 规格译文在不同语言下不稳定（泰文清空、越南文留残字），所以不参与合并，只用于显示。
+      // SKU 系列只决定排序，避免同一商品因为每行图片 id 不同而被拆成多行。
+      const key=i.style==="未识别款式"?`${i.style}|${i.remark}|${series}`:`${i.style}|${i.remark}`;
+      if(!map.has(key))map.set(key,{...i,series,models:{},orderNos:[],skus:[],first:index});
+      const g=map.get(key);
+      g.models[i.model]=(g.models[i.model]||0)+i.qty;
+      if(i.orderNo)g.orderNos.push(i.orderNo);
+      if(i.sku&&!g.skus.includes(i.sku))g.skus.push(i.sku);
+      if(!g.image&&i.image)g.image=i.image;
+    });
+    // 同一 SKU 系列的款式排在一起；系列之间保持文件顺序，方便按原有顺序配货。
+    const list=[...map.values()];
+    list.sort((a,b)=>(seriesOrder.get(a.series)??a.first)-(seriesOrder.get(b.series)??b.first)||a.first-b.first);
+    result[stall]=list;
+  });return result;
 }
 
 function roundRect(ctx,x,y,w,h,r,fill,stroke){ctx.beginPath();ctx.roundRect(x,y,w,h,r);if(fill){ctx.fillStyle=fill;ctx.fill();}if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=2;ctx.stroke();}}
@@ -236,7 +324,7 @@ async function drawCard(floor,stall,total,page,pages,items){
   x.fillStyle="#fffaf4";x.fillRect(0,0,W,H);const grad=x.createLinearGradient(0,0,W,0);grad.addColorStop(0,"#ff7466");grad.addColorStop(1,"#ff8b78");x.fillStyle=grad;x.fillRect(0,0,W,header);x.fillStyle="#fff";x.font="800 42px sans-serif";x.fillText(`${floor} · ${stall}`,34,68);x.font="600 22px sans-serif";x.fillText(`配货卡 · ${new Date().toLocaleDateString("zh-CN")}${pages>1?` · ${page}/${pages}`:""}`,36,108);roundRect(x,670,28,190,88,22,"#fff8f3");x.fillStyle="#ef665d";x.font="800 34px sans-serif";x.textAlign="center";x.fillText(`共 ${total} 件`,765,83);x.textAlign="left";
   let y=header;
   for(const item of items){roundRect(x,20,y+12,W-40,rowH-20,22,"#fff","#efdcd0");const ix=38,iy=y+30,size=220;roundRect(x,ix,iy,size,size,18,"#f7f1ec");if(item.image){try{const img=await loadImage(item.image);const scale=Math.min(size/img.width,size/img.height);const w=img.width*scale,h=img.height*scale;x.save();x.beginPath();x.roundRect(ix,iy,size,size,18);x.clip();x.drawImage(img,ix+(size-w)/2,iy+(size-h)/2,w,h);x.restore();}catch{}}else{x.fillStyle="#ae9c90";x.font="24px sans-serif";x.textAlign="center";x.fillText("无图",ix+size/2,iy+size/2);x.textAlign="left";}
-    const tx=286,max=570;x.fillStyle="#282524";x.font="800 30px sans-serif";wrap(x,item.style,max,1).forEach((line,j)=>x.fillText(line,tx,y+62+j*34));x.fillStyle="#7e7975";x.font="23px sans-serif";x.fillText(`规格：${item.specCn||item.style}`,tx,y+105);x.fillStyle="#1569d7";const modelTokens=Object.entries(item.models).sort().map(([m,q])=>`${m} × ${q}`);const fitted=fitModelLines(x,modelTokens,max,3),lineH=fitted.size+6;fitted.lines.forEach((line,j)=>x.fillText(line,tx,y+150+j*lineH));x.fillStyle="#8a8581";x.font="18px sans-serif";const identity=item.productKey||item.imageId||item.skus?.[0]||item.sku||"无商品编码";x.fillText(identity.slice(0,34)+(identity.length>34?"…":""),tx,y+238);const orderTails=[...new Set((item.orderNos||[]).map(no=>safe(no).slice(-4)).filter(Boolean))];x.fillStyle="#e85f57";x.font="700 18px sans-serif";x.fillText(`订单末4位：${orderTails.join("、").slice(0,30)}`,tx,y+264);if(item.remark){x.fillStyle="#d8443e";x.font="700 18px sans-serif";x.fillText(`! ${item.remark}`,tx,y+284);}y+=rowH;
+    const tx=286,max=570;x.fillStyle="#282524";x.font="800 30px sans-serif";wrap(x,item.style,max,1).forEach((line,j)=>x.fillText(line,tx,y+62+j*34));x.fillStyle="#7e7975";x.font="23px sans-serif";x.fillText(`规格：${/[\u4e00-\u9fff]/.test(item.specCn||"")?item.specCn:item.style}`,tx,y+105);x.fillStyle="#1569d7";const modelTokens=Object.entries(item.models).sort().map(([m,q])=>`${m} × ${q}`);const fitted=fitModelLines(x,modelTokens,max,3),lineH=fitted.size+6;fitted.lines.forEach((line,j)=>x.fillText(line,tx,y+150+j*lineH));x.fillStyle="#8a8581";x.font="18px sans-serif";const identity=item.productKey||item.imageId||item.skus?.[0]||item.sku||"无商品编码";x.fillText(identity.slice(0,34)+(identity.length>34?"…":""),tx,y+238);const orderTails=[...new Set((item.orderNos||[]).map(no=>safe(no).slice(-4)).filter(Boolean))];x.fillStyle="#e85f57";x.font="700 18px sans-serif";x.fillText(`订单末4位：${orderTails.join("、").slice(0,30)}`,tx,y+264);if(item.remark){x.fillStyle="#d8443e";x.font="700 18px sans-serif";x.fillText(`! ${item.remark}`,tx,y+284);}y+=rowH;
   }
   x.fillStyle="#fff5ed";x.fillRect(0,H-footer,W,footer);x.fillStyle="#e95650";x.strokeStyle="#e95650";x.lineWidth=4;x.strokeRect(32,H-57,30,30);x.font="700 23px sans-serif";x.fillText("已配齐",76,H-33);x.textAlign="center";x.fillStyle="#302c2a";x.font="800 25px sans-serif";x.fillText(`${items.length} 个商品 · ${total} 件`,W/2,H-34);x.textAlign="left";
   const blob=await new Promise(resolve=>c.toBlob(resolve,"image/png"));return{url:URL.createObjectURL(blob),blob};
@@ -273,3 +361,4 @@ $("#installButton").addEventListener("click",async()=>{if(installPrompt){install
 function updateNetwork(){ $("#networkText").textContent=navigator.onLine?"离线可用":"当前离线"; }
 addEventListener("online",updateNetwork);addEventListener("offline",updateNetwork);updateNetwork();renderStalls();renderHistory();restoreToday();
 if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("./sw.js"));
+
