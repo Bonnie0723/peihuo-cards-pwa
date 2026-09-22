@@ -160,13 +160,14 @@ function readOrders(data,imageMap){
   const headers=rows[0].map(safe), required=["产品规格","单个产品数量","多品名","商品名称","商品图片"];
   const missing=required.filter(x=>!headers.includes(x)); if(missing.length)throw new Error(`缺少字段：${missing.join("、")}`);
   const ix={};headers.forEach((h,i)=>{if(h)ix[h]=i;});
+  const skuColumn=ix["商品SKU"] ?? ix["SKU"] ?? ix["sku"];
   const orders=[];
   for(let r=1;r<rows.length;r++){
     const row=rows[r]||[];
     const cell=ws[XLSX.utils.encode_cell({r,c:ix["商品图片"]})];
     const formula=cell?.f?`=${cell.f}`:safe(row[ix["商品图片"]]);
     const id=(formula.match(/DISPIMG\("([^"]+)"/i)||[])[1]||"";
-    const item={orderNo:safe(row[ix["订单号"]]),orderNoLast4:safe(row[ix["订单号"]]).slice(-4),spec:safe(row[ix["产品规格"]]),qty:Math.max(1,parseInt(row[ix["单个产品数量"]])||1),multiName:safe(row[ix["多品名"]]),sku:ix["商品SKU"]==null?"":safe(row[ix["商品SKU"]]),stall:safe(row[ix["商品名称"]]),code:ix["商品编码"]==null?"":safe(row[ix["商品编码"]]),imageId:id,image:imageMap[id]||imageMap[`row:${r}`]||""};
+    const item={orderNo:safe(row[ix["订单号"]]),orderNoLast4:safe(row[ix["订单号"]]).slice(-4),spec:safe(row[ix["产品规格"]]),qty:Math.max(1,parseInt(row[ix["单个产品数量"]])||1),multiName:safe(row[ix["多品名"]]),sku:skuColumn==null?"":safe(row[skuColumn]),stall:safe(row[ix["商品名称"]]),code:ix["商品编码"]==null?"":safe(row[ix["商品编码"]]),imageId:id,image:imageMap[id]||imageMap[`row:${r}`]||""};
     if(item.orderNo||item.spec||item.multiName||item.sku||item.stall||formula)orders.push(item);
   }
   if(!orders.length)throw new Error("最后一个 Sheet 没有订单行");
