@@ -298,8 +298,8 @@ function mergeOrders(items){
       if(!seriesOrder.has(series))seriesOrder.set(series,index);
       // 同一款式就是同一件实物：型号累加合并成一行。
       // 规格译文在不同语言下不稳定（泰文清空、越南文留残字），所以不参与合并，只用于显示。
-      // SKU 系列只决定排序，避免同一商品因为每行图片 id 不同而被拆成多行。
-      const key=i.style==="未识别款式"?`${i.style}|${i.remark}|${series}`:`${i.style}|${i.remark}`;
+      // SKU 系列既参与合并边界，也参与排序：不同系列绝不互相合并；同系列同款式的相同型号数量累加。
+      const key=`${series}|${i.style}|${i.remark}`;
       if(!map.has(key))map.set(key,{...i,series,models:{},orderNos:[],skus:[],first:index});
       const g=map.get(key);
       g.models[i.model]=(g.models[i.model]||0)+i.qty;
