@@ -102,19 +102,41 @@ async function processFile(file){
     updateDashboard(orders,grouped,generatedCards,file.name,sheetName,currentBatch.orders.length,previousUploads.length+1);
     input.value="";
     setTimeout(()=>$("#progressCard").classList.add("hidden"),1300);
-  }catch(error){ console.error(error); $("#progressCard").classList.add("hidden"); toast(error.message||"生成失败，请检查订单文件"); }
+  }catch(error){ console.error(error); setProgress(0,"生成未完成",error.message||"生成失败，请检查订单文件"); toast(error.message||"生成失败，请检查订单文件"); }
 }
-const nextFrame=()=>new Promise(resolve=>requestAnimationFrame(resolve));
+const nextFrame=()=>new Promise(resolve=>setTimeout(resolve,0));
+function withTimeout(promise,ms,message){
+  let timer;
+  return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(message)),ms);})]).finally(()=>clearTimeout(timer));
+}
 
 async function readOrderBatch(data){
   const imageMap=await extractCellImages(data);
+  setProgress(38,"正在读取订单行","图片已提取，正在解析最后一个工作表");
+  await nextFrame();
   return readOrders(data,imageMap);
 }
 
 function normalizePath(path){ const out=[]; path.split("/").forEach(p=>{if(p==="..")out.pop();else if(p&&p!==".")out.push(p);});return out.join("/"); }
 async function extractCellImages(data){
   const map={};
-  const zip=await JSZip.loadAsync(data);
+  setProgress(20,"正在解压订单文件","大文件需要较长时间，请保持页面打开");
+  await nextFrame();
+  const zip=await withTimeout(JSZip.loadAsync(data),60000,"订单文件解压超过60秒，请重试或提供原Excel排查");
+  const imageCache=new Map();
+  let extracted=0;
+  async function imageUrl(path){
+    if(imageCache.has(path))return imageCache.get(path);
+    const entry=zip.file(path);
+    if(!entry)return "";
+    setProgress(25,"正在提取商品图片",`已提取 ${extracted} 张，正在读取下一张`);
+    await nextFrame();
+    const blob=await withTimeout(entry.async("blob"),30000,`图片读取超时：${path}`);
+    const url=URL.createObjectURL(blob);
+    imageCache.set(path,url);
+    extracted++;
+    return url;
+  }
   const parser=new DOMParser();
 
   if(zip.file("xl/cellimages.xml")&&zip.file("xl/_rels/cellimages.xml.rels")){
@@ -129,7 +151,7 @@ async function extractCellImages(data){
       const target=rels[rid]; if(!id||!target)continue;
       const path=target.startsWith("xl/")?target:normalizePath(`xl/${target}`);
       const entry=zip.file(path); if(!entry)continue;
-      map[id]=URL.createObjectURL(await entry.async("blob"));
+      map[id]=await imageUrl(path);
     }
   }
 
@@ -147,7 +169,7 @@ async function extractCellImages(data){
       const rid=blip?.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships","embed")||blip?.getAttribute("r:embed")||"";
       const target=rels[rid]; if(row==null||!target)continue;
       const path=normalizePath(`xl/drawings/${target}`), entry=zip.file(path);
-      if(entry)map[`row:${row}`]=URL.createObjectURL(await entry.async("blob"));
+      if(entry)map[`row:${row}`]=await imageUrl(path);
     }
   }
   return map;
@@ -155,7 +177,11 @@ async function extractCellImages(data){
 function readOrders(data,imageMap){
   const wb=XLSX.read(data,{type:"array",cellFormula:true});
   const sheetName=wb.SheetNames.at(-1), ws=wb.Sheets[sheetName];
-  const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:""});
+  // Ignore formatting-only cells that can expand !ref to a million empty rows.
+  const cells=Object.keys(ws).filter(key=>/^[A-Z]+[1-9][0-9]*$/.test(key)&& (ws[key].v!=null||ws[key].f));
+  let lastRow=0,lastCol=0;
+  for(const key of cells){const p=XLSX.utils.decode_cell(key);lastRow=Math.max(lastRow,p.r);lastCol=Math.max(lastCol,p.c);}
+  const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:"",range:{s:{r:0,c:0},e:{r:lastRow,c:lastCol}}});
   if(!rows.length)throw new Error("订单表为空");
   const headers=rows[0].map(safe), required=["产品规格","单个产品数量","多品名","商品名称","商品图片"];
   const missing=required.filter(x=>!headers.includes(x)); if(missing.length)throw new Error(`缺少字段：${missing.join("、")}`);
