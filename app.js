@@ -266,9 +266,9 @@ function normalizeModel(value){let s=safe(value).replace(/^i?Phone\s*/i,"").repl
 function normalizeAirPodsModel(value){
   const m=safe(value).match(/AirPods?\s*(?:(Pro)\s*([1-3])?\s*代?|([1-4])\s*(?:代|Gen(?:eration)?)?|Max)/i);
   if(!m)return"";
-  if(/Max/i.test(m[0]))return"AirPods Max";
-  if(m[1])return`AirPods Pro${m[2]||""}`;
-  return m[3]?`AirPods ${m[3]}`:"AirPods";
+  if(/Max/i.test(m[0]))return"Max";
+  if(m[1])return m[2]?`Pro${m[2]}代`:"Pro";
+  return m[3]?`${m[3]}代`:"AirPods";
 }
 function extractModel(spec,name){
   const found=[];const re=/(?:i?Phone\s*)?(13|14|15|16|17|18)\s*(Pro\s*Max|promax|PM|Pro|P)?\b/gi;let m;
